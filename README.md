@@ -405,6 +405,11 @@ If you encounter any issues:
 3. Ensure all API keys are correctly configured
 4. Verify your Python version is 3.13.3
 
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+
 ---
 
 **Made with ❤️ by [Ujwal](mailto:ujwalujwalc@gmail.com)**
