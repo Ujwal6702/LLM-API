@@ -372,22 +372,6 @@ The application follows an MVC (Model-View-Controller) architecture:
 3. **Rate Limiter**: Prevents API quota exhaustion
 4. **Health Monitor**: Tracks provider availability and performance
 
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Add tests for new functionality
-5. Ensure all tests pass (`poetry run pytest`)
-6. Format code (`poetry run black app/`)
-7. Commit changes (`git commit -m 'Add amazing feature'`)
-8. Push to branch (`git push origin feature/amazing-feature`)
-9. Open a Pull Request
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
 ## 🙏 Acknowledgments
 
 - **Groq**: For providing lightning-fast LLM inference
@@ -407,6 +391,6 @@ If you encounter any issues:
 
 ---
 
-**Made with ❤️ by [Ujwal](mailto:ujwalujwalc@gmail.com)**
+**Made for early developers by [Ujwal](mailto:ujwalujwalc@gmail.com)**
 
 > 🔥 **All LLM providers verified as FREE with generous quotas** - Updated June 29, 2025
