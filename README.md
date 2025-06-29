@@ -41,9 +41,11 @@ A FastAPI-based service that aggregates multiple free LLM providers (Groq, Cereb
 | **Groq** | llama-3.3-70b-versatile | 70B | 131k tokens | 30 req/min | ✅ Production |
 | **Cerebras** | llama-3.3-70b | 70B | 65k tokens | 30 req/min | ✅ Production |
 | **Cerebras** | llama-4-scout-17b-16e-instruct | 17B | 8k tokens | 30 req/min | ✅ Production |
-| **Google Gemini** | gemini-2.0-flash | Large | 1M tokens | 15 req/min | ✅ Production |
+| **Google Gemini** | gemini-2.5-flash | Multimodal | 1M tokens | Free tier* | ✅ Production |
 
 > 🔥 **All providers verified as FREE with NO CREDIT CARD requirements** (as of June 29, 2025)
+
+*Note: Gemini API rate limits are not publicly specified for the free tier. Limits vary by model and usage tier. See [official rate limits page](https://ai.google.dev/gemini-api/docs/rate-limits) for current information.
 
 ## 📋 Prerequisites
 
@@ -205,6 +207,11 @@ nano .env  # or use your preferred editor
 2. Sign in with Google account
 3. Create API key
 4. Add to `.env`: `GEMINI_API_KEY=your_key_here`
+
+**Available Models:**
+- `gemini-2.5-flash` - Latest multimodal model with 1M token context
+- `gemini-2.0-flash` - Previous generation with native tool use
+- `gemini-1.5-flash` - High-speed model for diverse tasks
 
 ### 3. Example .env Configuration
 

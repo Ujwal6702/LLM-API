@@ -250,6 +250,72 @@ class LLMService(BaseService):
                 "error": str(e)
             }
     
+    async def get_rate_limit_status(self, provider_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get current rate limit status for providers
+        """
+        try:
+            if provider_name:
+                # Get status for specific provider
+                if provider_name not in self.provider_manager.get_all_clients():
+                    raise ValueError(f"Provider '{provider_name}' not found")
+                
+                client = self.provider_manager.get_client(provider_name)
+                status = {}
+                
+                # Get status for each model supported by the provider
+                for model in client.models:
+                    model_status = await client.get_rate_limit_status(model)
+                    status[model] = model_status
+                
+                # Also get default status
+                default_status = await client.get_rate_limit_status()
+                status["default"] = default_status
+                
+                return {
+                    "provider": provider_name,
+                    "rate_limits": status,
+                    "provider_stats": client.get_stats()
+                }
+            else:
+                # Get status for all providers
+                all_status = {}
+                
+                for provider_name, client in self.provider_manager.get_all_clients().items():
+                    provider_status = {}
+                    
+                    # Get status for each model
+                    for model in client.models:
+                        model_status = await client.get_rate_limit_status(model)
+                        provider_status[model] = model_status
+                    
+                    # Also get default status
+                    default_status = await client.get_rate_limit_status()
+                    provider_status["default"] = default_status
+                    
+                    all_status[provider_name] = {
+                        "rate_limits": provider_status,
+                        "provider_stats": client.get_stats()
+                    }
+                
+                return {
+                    "providers": all_status,
+                    "summary": {
+                        "total_providers": len(all_status),
+                        "timestamp": time.time()
+                    }
+                }
+                
+        except Exception as e:
+            return {
+                "error": f"Failed to get rate limit status: {str(e)}",
+                "providers": {},
+                "summary": {
+                    "total_providers": 0,
+                    "timestamp": time.time()
+                }
+            }
+    
     def _validate_request(self, request: LLMRequest) -> bool:
         """
         Validate LLM request parameters

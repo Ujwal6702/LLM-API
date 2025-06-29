@@ -64,10 +64,9 @@ class BaseProviderClient(ABC):
         self.config = config
         self.base_url = config["base_url"]
         self.api_key = self._get_api_key(config["api_key_env"])
-        self.rate_limit = RateLimit(
-            requests_per_minute=config["rate_limit"],
-            requests_per_day=config.get("daily_limit")
-        )
+        
+        # Enhanced rate limits configuration
+        self.rate_limits = self._build_rate_limits(config)
         self.models = config["models"]
         self.supports_temperature = config.get("supports_temperature", True)
         self.supports_top_p = config.get("supports_top_p", True)
@@ -79,25 +78,72 @@ class BaseProviderClient(ABC):
         self.failed_requests = 0
         self.last_request_time = 0
         self.average_latency = 0.0
+        self.total_tokens_used = 0
     
     def _get_api_key(self, env_var: str) -> str:
         """Get API key from environment variable"""
         import os
         return os.getenv(env_var, "")
     
+    def _build_rate_limits(self, config: Dict[str, Any]) -> Dict[str, RateLimit]:
+        """Build rate limit configurations for different models"""
+        rate_limits = {}
+        
+        # Get rate limits configuration
+        rate_limits_config = config.get("rate_limits", {})
+        
+        # Handle old format (backward compatibility)
+        if "rate_limit" in config:
+            default_limit = RateLimit(
+                requests_per_minute=config["rate_limit"],
+                tokens_per_minute=config.get("token_limit"),
+                requests_per_day=config.get("daily_limit"),
+                tokens_per_day=config.get("daily_token_limit")
+            )
+            rate_limits["default"] = default_limit
+            return rate_limits
+        
+        # Build rate limits for each model/configuration
+        for key, limits in rate_limits_config.items():
+            rate_limits[key] = RateLimit(
+                requests_per_minute=limits.get("requests_per_minute"),
+                requests_per_hour=limits.get("requests_per_hour"),
+                requests_per_day=limits.get("requests_per_day"),
+                requests_per_month=limits.get("requests_per_month"),
+                tokens_per_minute=limits.get("tokens_per_minute"),
+                tokens_per_hour=limits.get("tokens_per_hour"),
+                tokens_per_day=limits.get("tokens_per_day"),
+                tokens_per_month=limits.get("tokens_per_month")
+            )
+        
+        return rate_limits
+    
+    def _get_rate_limit_for_model(self, model: str) -> RateLimit:
+        """Get appropriate rate limit for a specific model"""
+        if model in self.rate_limits:
+            return self.rate_limits[model]
+        elif "default" in self.rate_limits:
+            return self.rate_limits["default"]
+        else:
+            # Fallback to a basic rate limit
+            return RateLimit(requests_per_minute=10, tokens_per_minute=10000)
+    
     @abstractmethod
     async def generate_completion(self, request: LLMRequest) -> ProviderResponse:
         """Generate completion using the provider"""
         pass
     
-    async def check_availability(self) -> Tuple[bool, Dict[str, Any]]:
-        """Check if provider is available"""
+    async def check_availability(self, model: str = None) -> Tuple[bool, Dict[str, Any]]:
+        """Check if provider is available for a specific model"""
         if not self.api_key:
             return False, {"error": "API key not configured"}
         
+        # Get appropriate rate limit
+        rate_limit = self._get_rate_limit_for_model(model or "default")
+        
         # Check rate limits
         allowed, rate_info = await rate_limiter_manager.check_rate_limit(
-            self.provider_name, self.rate_limit
+            f"{self.provider_name}:{model or 'default'}", rate_limit
         )
         
         if not allowed:
@@ -107,6 +153,20 @@ class BaseProviderClient(ABC):
             }
         
         return True, {"status": "available"}
+    
+    async def record_token_usage(self, model: str, tokens_used: int):
+        """Record token usage for rate limiting"""
+        self.total_tokens_used += tokens_used
+        await rate_limiter_manager.record_token_usage(
+            f"{self.provider_name}:{model}", tokens_used
+        )
+    
+    async def get_rate_limit_status(self, model: str = None) -> Dict[str, Any]:
+        """Get current rate limit status"""
+        rate_limit = self._get_rate_limit_for_model(model or "default")
+        return await rate_limiter_manager.get_rate_limit_status(
+            f"{self.provider_name}:{model or 'default'}", rate_limit
+        )
     
     def _build_parameters(self, request: LLMRequest) -> Dict[str, Any]:
         """Build parameters for the API request"""
@@ -159,7 +219,9 @@ class BaseProviderClient(ABC):
             "success_rate": success_rate,
             "average_latency": self.average_latency,
             "last_request_time": self.last_request_time,
-            "models": self.models
+            "total_tokens_used": self.total_tokens_used,
+            "models": self.models,
+            "available": success_rate > 0.5 if self.total_requests > 0 else True
         }
 
 
@@ -174,15 +236,13 @@ class OpenAICompatibleClient(BaseProviderClient):
     async def generate_completion(self, request: LLMRequest) -> ProviderResponse:
         """Generate completion using OpenAI-compatible API"""
         start_time = time.time()
+        model = request.model if request.model in self.models else self.models[0]
         
         try:
-            # Check availability
-            available, availability_info = await self.check_availability()
+            # Check availability for specific model
+            available, availability_info = await self.check_availability(model)
             if not available:
                 raise Exception(f"Provider unavailable: {availability_info}")
-            
-            # Prepare request
-            model = request.model if request.model in self.models else self.models[0]
             
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
@@ -200,20 +260,34 @@ class OpenAICompatibleClient(BaseProviderClient):
                 **self._build_parameters(request)
             }
             
-            # Make request
+            # Make API request
             async with httpx.AsyncClient(timeout=settings.REQUEST_TIMEOUT) as client:
                 response = await client.post(
                     f"{self.base_url}/chat/completions",
-                    headers=headers,
-                    json=payload
+                    json=payload,
+                    headers=headers
                 )
-                response.raise_for_status()
-                
-                data = response.json()
-                content = data["choices"][0]["message"]["content"]
-                usage = data.get("usage", {})
                 
                 latency = time.time() - start_time
+                
+                if response.status_code == 429:
+                    self._update_stats(False, latency)
+                    raise Exception(f"Rate limit exceeded: {response.text}")
+                
+                response.raise_for_status()
+                result = response.json()
+                
+                # Extract response content
+                content = result["choices"][0]["message"]["content"]
+                usage = result.get("usage", {})
+                
+                # Record token usage for rate limiting
+                if "total_tokens" in usage:
+                    await self.record_token_usage(model, usage["total_tokens"])
+                elif "prompt_tokens" in usage and "completion_tokens" in usage:
+                    total_tokens = usage["prompt_tokens"] + usage["completion_tokens"]
+                    await self.record_token_usage(model, total_tokens)
+                
                 self._update_stats(True, latency)
                 
                 return ProviderResponse(
@@ -225,21 +299,18 @@ class OpenAICompatibleClient(BaseProviderClient):
                     status=ProviderStatus.AVAILABLE
                 )
                 
-        except httpx.HTTPStatusError as e:
-            latency = time.time() - start_time
-            self._update_stats(False, latency)
-            
-            if e.response.status_code == 429:
-                status = ProviderStatus.RATE_LIMITED
-            else:
-                status = ProviderStatus.ERROR
-            
-            raise Exception(f"HTTP {e.response.status_code}: {e.response.text}")
-            
         except Exception as e:
             latency = time.time() - start_time
             self._update_stats(False, latency)
-            raise Exception(f"Request failed: {str(e)}")
+            
+            # Determine status based on error
+            status = ProviderStatus.ERROR
+            if "rate limit" in str(e).lower() or "429" in str(e):
+                status = ProviderStatus.RATE_LIMITED
+            elif "timeout" in str(e).lower():
+                status = ProviderStatus.UNAVAILABLE
+            
+            raise Exception(f"{self.provider_name} error: {str(e)}")
 
 
 class GeminiClient(BaseProviderClient):
@@ -252,14 +323,13 @@ class GeminiClient(BaseProviderClient):
     async def generate_completion(self, request: LLMRequest) -> ProviderResponse:
         """Generate completion using Google Gemini API"""
         start_time = time.time()
+        model = request.model if request.model in self.models else self.models[0]
         
         try:
-            # Check availability
-            available, availability_info = await self.check_availability()
+            # Check availability for specific model
+            available, availability_info = await self.check_availability(model)
             if not available:
                 raise Exception(f"Provider unavailable: {availability_info}")
-            
-            model = request.model if request.model in self.models else self.models[0]
             
             headers = {
                 "Content-Type": "application/json"
@@ -279,9 +349,7 @@ class GeminiClient(BaseProviderClient):
             payload = {
                 "contents": [
                     {
-                        "parts": [
-                            {"text": request.query}
-                        ]
+                        "parts": [{"text": request.query}]
                     }
                 ]
             }
@@ -289,40 +357,42 @@ class GeminiClient(BaseProviderClient):
             if generation_config:
                 payload["generationConfig"] = generation_config
             
-            # Make request
+            # Make API request
+            url = f"{self.base_url}/models/{model}:generateContent?key={self.api_key}"
+            
             async with httpx.AsyncClient(timeout=settings.REQUEST_TIMEOUT) as client:
-                response = await client.post(
-                    f"{self.base_url}/models/{model}:generateContent?key={self.api_key}",
-                    headers=headers,
-                    json=payload
-                )
+                response = await client.post(url, json=payload, headers=headers)
+                
+                latency = time.time() - start_time
+                
+                if response.status_code == 429:
+                    self._update_stats(False, latency)
+                    raise Exception(f"Rate limit exceeded: {response.text}")
+                
                 response.raise_for_status()
+                result = response.json()
                 
-                data = response.json()
-                
-                # Extract content from Gemini response
-                if "candidates" in data and len(data["candidates"]) > 0:
-                    candidate = data["candidates"][0]
-                    if "content" in candidate and "parts" in candidate["content"]:
-                        content = candidate["content"]["parts"][0].get("text", "")
-                    else:
-                        content = ""
+                # Extract content from Gemini response format
+                if "candidates" in result and result["candidates"]:
+                    candidate = result["candidates"][0]
+                    content = candidate["content"]["parts"][0]["text"]
                 else:
-                    content = ""
+                    raise Exception("No valid response from Gemini")
                 
                 # Extract usage information
                 usage = {}
-                if "usageMetadata" in data:
-                    usage_meta = data["usageMetadata"]
+                if "usageMetadata" in result:
+                    metadata = result["usageMetadata"]
                     usage = {
-                        "prompt_tokens": usage_meta.get("promptTokenCount", 0),
-                        "completion_tokens": usage_meta.get("candidatesTokenCount", 0),
-                        "total_tokens": usage_meta.get("totalTokenCount", 0)
+                        "prompt_tokens": metadata.get("promptTokenCount", 0),
+                        "completion_tokens": metadata.get("candidatesTokenCount", 0),
+                        "total_tokens": metadata.get("totalTokenCount", 0)
                     }
-                else:
-                    usage = {"estimated_tokens": len(content.split())}
                 
-                latency = time.time() - start_time
+                # Record token usage for rate limiting
+                if usage.get("total_tokens"):
+                    await self.record_token_usage(model, usage["total_tokens"])
+                
                 self._update_stats(True, latency)
                 
                 return ProviderResponse(
@@ -334,21 +404,18 @@ class GeminiClient(BaseProviderClient):
                     status=ProviderStatus.AVAILABLE
                 )
                 
-        except httpx.HTTPStatusError as e:
-            latency = time.time() - start_time
-            self._update_stats(False, latency)
-            
-            if e.response.status_code == 429:
-                status = ProviderStatus.RATE_LIMITED
-            else:
-                status = ProviderStatus.ERROR
-            
-            raise Exception(f"Gemini HTTP {e.response.status_code}: {e.response.text}")
-            
         except Exception as e:
             latency = time.time() - start_time
             self._update_stats(False, latency)
-            raise Exception(f"Gemini request failed: {str(e)}")
+            
+            # Determine status based on error
+            status = ProviderStatus.ERROR
+            if "rate limit" in str(e).lower() or "quota" in str(e).lower() or "429" in str(e):
+                status = ProviderStatus.RATE_LIMITED
+            elif "timeout" in str(e).lower():
+                status = ProviderStatus.UNAVAILABLE
+            
+            raise Exception(f"{self.provider_name} error: {str(e)}")
 
 
 class ProviderClientFactory:

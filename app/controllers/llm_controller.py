@@ -168,6 +168,41 @@ class LLMController(BaseController):
                 status_code=500,
                 detail=f"Failed to get providers for model '{model}': {str(e)}"
             )
+    
+    async def get_rate_limit_status(self, provider: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get current rate limit status for all providers or a specific provider
+        """
+        try:
+            result = await self.llm_service.get_rate_limit_status(provider)
+            return self.handle_success(
+                data=result,
+                message="Rate limit status retrieved successfully"
+            )
+            
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to get rate limit status: {str(e)}"
+            )
+    
+    async def get_rate_limit_analytics(self, provider: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get comprehensive rate limit analytics and recommendations
+        """
+        try:
+            from app.utils.rate_limit_monitor import rate_limit_monitor
+            result = await rate_limit_monitor.get_comprehensive_status(provider)
+            return self.handle_success(
+                data=result,
+                message="Rate limit analytics retrieved successfully"
+            )
+            
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to get rate limit analytics: {str(e)}"
+            )
 
 
 # Initialize controller
@@ -273,3 +308,66 @@ async def get_providers_for_model_endpoint(model: str):
     Get list of providers that support a specific model.
     """
     return await llm_controller.get_providers_for_model(model)
+
+@router.get("/rate-limit-status", summary="Get Rate Limit Status")
+async def get_rate_limit_status_endpoint(provider: Optional[str] = Query(None, description="Provider ID (optional)")):
+    """
+    Get current rate limit status for all providers or a specific provider.
+    
+    - If **provider** is not specified, returns rate limit status for all providers.
+    - If **provider** is specified, returns rate limit status for the given provider.
+    """
+    return await llm_controller.get_rate_limit_status(provider)
+
+@router.get("/rate-limits", summary="Get Rate Limit Status")
+async def get_rate_limits_endpoint(
+    provider: Optional[str] = Query(None, description="Specific provider to check (optional)")
+):
+    """
+    Get current rate limit status for all providers or a specific provider.
+    
+    Returns:
+    - Current usage across all time windows (minute, hour, day, month)
+    - Remaining quota for each limit type
+    - Reset times for each limit window
+    - Rate limit violations and retry information
+    
+    **Query Parameters:**
+    - **provider**: Optional provider name to filter results
+    """
+    return await llm_controller.get_rate_limit_status(provider)
+
+@router.get("/rate-limit-analytics", summary="Get Rate Limit Analytics")
+async def get_rate_limit_analytics_endpoint(provider: Optional[str] = Query(None, description="Provider ID (optional)")):
+    """
+    Get comprehensive rate limit analytics and recommendations.
+    
+    - If **provider** is not specified, returns analytics for all providers.
+    - If **provider** is specified, returns analytics for the given provider.
+    """
+    return await llm_controller.get_rate_limit_analytics(provider)
+
+@router.get("/rate-limits/analytics", summary="Get Rate Limit Analytics")
+async def get_rate_limit_analytics_endpoint(
+    provider: Optional[str] = Query(None, description="Specific provider to analyze (optional)")
+):
+    """
+    Get comprehensive rate limit analytics with predictions and recommendations.
+    
+    This advanced endpoint provides:
+    - Current usage across all time windows
+    - Utilization percentages and warnings
+    - Usage predictions for next hour/day
+    - Optimization recommendations
+    - Time-to-limit calculations
+    
+    **Features:**
+    - **Real-time monitoring**: Current usage across all rate limit dimensions
+    - **Predictive analytics**: Forecasts when limits might be reached
+    - **Smart recommendations**: Actionable suggestions for optimization
+    - **Multi-provider analysis**: Compare usage across different providers
+    
+    **Query Parameters:**
+    - **provider**: Optional provider name for detailed analysis
+    """
+    return await llm_controller.get_rate_limit_analytics(provider)

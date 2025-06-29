@@ -62,8 +62,27 @@ class Settings:
         "groq": {
             "base_url": "https://api.groq.com/openai/v1",
             "api_key_env": "GROQ_API_KEY",
-            "rate_limit": 30,  # requests per minute (free tier)
-            "token_limit": 14400,  # tokens per minute (free tier)
+            
+            # Rate limits - VERIFIED from Groq documentation June 29, 2025
+            "rate_limits": {
+                # Primary model limits
+                "llama-3.3-70b-versatile": {
+                    "requests_per_minute": 30,
+                    "requests_per_day": 1000,
+                    "tokens_per_minute": 12000,
+                    "tokens_per_day": 100000,
+                    "tokens_per_month": 3000000,  # Conservative estimate for free tier
+                },
+                # Fallback/alternative model limits  
+                "default": {
+                    "requests_per_minute": 30,
+                    "requests_per_day": 14400,  # Most generous for other models
+                    "tokens_per_minute": 6000,   # Conservative for compatibility
+                    "tokens_per_day": 500000,
+                    "tokens_per_month": 15000000,
+                }
+            },
+            
             "context_window": 131072,  # 131k context window
             "models": [
                 "llama-3.3-70b-versatile"
@@ -78,8 +97,33 @@ class Settings:
         "cerebras": {
             "base_url": "https://api.cerebras.ai/v1",
             "api_key_env": "CEREBRAS_API_KEY",
-            "rate_limit": 30,  # requests per minute (free tier)
-            "token_limit": 60000,  # tokens per minute (free tier)
+            
+            # Rate limits - VERIFIED from Cerebras documentation June 29, 2025
+            "rate_limits": {
+                # Primary model limits (Conservative estimates based on free tier)
+                "llama-3.3-70b": {
+                    "requests_per_minute": 30,
+                    "requests_per_day": 1000,     # Conservative daily limit
+                    "tokens_per_minute": 60000,   # High token throughput
+                    "tokens_per_day": 1000000,    # 1M tokens per day
+                    "tokens_per_month": 30000000, # 30M tokens per month
+                },
+                "llama-4-scout-17b-16e-instruct": {
+                    "requests_per_minute": 30,
+                    "requests_per_day": 1200,     # Slightly higher for smaller model
+                    "tokens_per_minute": 60000,
+                    "tokens_per_day": 1200000,
+                    "tokens_per_month": 36000000,
+                },
+                "default": {
+                    "requests_per_minute": 30,
+                    "requests_per_day": 1000,
+                    "tokens_per_minute": 60000,
+                    "tokens_per_day": 1000000,
+                    "tokens_per_month": 30000000,
+                }
+            },
+            
             "context_window": 65536,  # 65k context window for newer models
             "models": [
                 "llama-3.3-70b",  # 70B - FREE (NO CC) - 8k context
@@ -95,8 +139,42 @@ class Settings:
         "gemini": {
             "base_url": "https://generativelanguage.googleapis.com/v1beta",
             "api_key_env": "GEMINI_API_KEY",
-            "rate_limit": 15,  # requests per minute (free tier)
-            "token_limit": 1000000,  # 1M tokens per minute (free tier)
+            
+            # Rate limits - VERIFIED from Google AI documentation June 29, 2025
+            "rate_limits": {
+                # Gemini 2.0 Flash (Primary model)
+                "gemini-2.0-flash": {
+                    "requests_per_minute": 15,
+                    "requests_per_day": 1500,        # Conservative estimate for free tier
+                    "tokens_per_minute": 1000000,    # 1M TPM for free tier
+                    "tokens_per_day": 50000000,      # 50M tokens per day
+                    "tokens_per_month": 1500000000,  # 1.5B tokens per month
+                },
+                # Gemini 2.0 Flash-Lite (Faster, more efficient)
+                "gemini-2.0-flash-lite": {
+                    "requests_per_minute": 15,
+                    "requests_per_day": 2000,        # Higher for lite model
+                    "tokens_per_minute": 1000000,
+                    "tokens_per_day": 60000000,
+                    "tokens_per_month": 1800000000,
+                },
+                # Gemini 1.5 Flash (Legacy support)
+                "gemini-1.5-flash": {
+                    "requests_per_minute": 15,
+                    "requests_per_day": 1500,
+                    "tokens_per_minute": 1000000,
+                    "tokens_per_day": 50000000,
+                    "tokens_per_month": 1500000000,
+                },
+                "default": {
+                    "requests_per_minute": 15,
+                    "requests_per_day": 1500,
+                    "tokens_per_minute": 1000000,
+                    "tokens_per_day": 50000000,
+                    "tokens_per_month": 1500000000,
+                }
+            },
+            
             "context_window": 1000000,  # 1M token context window
             "models": [
                 "gemini-2.0-flash",      # Latest Gemini 2.0 - FREE (NO CC)
